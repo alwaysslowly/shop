@@ -11,4 +11,5 @@ public class Product {
     private Long salePrc;
     private String thmbImgUrl;
     private String saleSttsCd;
+    private String prdDesc;
 }

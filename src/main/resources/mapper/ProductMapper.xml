@@ -15,5 +15,21 @@
          WHERE USE_YN = 'Y'
          ORDER BY PRD_NO DESC
     </select>
+    
+    <select id="selectProduct" resultType="Product">
+    SELECT PRD_NO
+         , CTGRY_NO
+         , PRD_NM
+         , PRD_DESC
+         , ORGNL_PRC
+         , SALE_PRC
+         , THMB_IMG_URL
+         , SALE_STTS_CD
+      FROM PRODUCT
+     WHERE PRD_NO = #{prdNo}
+       AND USE_YN = 'Y'
+	</select>
+
+
 
 </mapper>

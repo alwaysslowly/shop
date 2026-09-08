@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.shop.mapper.CategoryMapper">
+
+    <select id="selectCategoryList" resultType="Category">
+        SELECT CTGRY_NO
+             , UP_CTGRY_NO
+             , CTGRY_NM
+             , CTGRY_LVL
+             , SORT_ORD
+             , USE_YN
+          FROM CATEGORY
+         ORDER BY CTGRY_NO DESC
+    </select>
+    
+    <select id="selectCategory" resultType="Category">
+        SELECT CTGRY_NO
+             , UP_CTGRY_NO
+             , CTGRY_NM
+             , CTGRY_LVL
+             , SORT_ORD
+             , USE_YN
+          FROM CATEGORY
+          WHERE CTGRY_NO = #{ctgryNo}
+         ORDER BY CTGRY_NO DESC
+    
+	</select>
+
+
+
+</mapper>

@@ -9,5 +9,6 @@ import com.shop.domain.Product;
 @Mapper
 public interface ProductMapper {
 	List<Product> selectProductList();
-
+	
+	Product selectProduct(Long prdNo);
 }
