@@ -1,0 +1,6 @@
+spring:
+  datasource:
+    driver-class-name: oracle.jdbc.OracleDriver
+    url: jdbc:oracle:thin:@localhost:1521/FREEPDB1
+    username: SHOP
+    password: 여기에_본인_비밀번호

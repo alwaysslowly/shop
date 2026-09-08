@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.shop.mapper.ProductMapper">
+
+    <select id="selectProductList" resultType="Product">
+        SELECT PRD_NO
+             , CTGRY_NO
+             , PRD_NM
+             , ORGNL_PRC
+             , SALE_PRC
+             , THMB_IMG_URL
+             , SALE_STTS_CD
+          FROM PRODUCT
+         WHERE USE_YN = 'Y'
+         ORDER BY PRD_NO DESC
+    </select>
+
+</mapper>
