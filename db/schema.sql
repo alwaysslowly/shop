@@ -1,0 +1,442 @@
+/* =====================================================================
+ * 커머스 연습 프로젝트 - 스키마 초안
+ * DB : Oracle Database 23ai Free (FREEPDB1)
+ * 계정 : SHOP
+ *
+ * 실행 전 확인
+ *  - SHOP 계정으로 접속했는지 확인 (SYSTEM 계정에서 실행 금지)
+ *  - 한글 컬럼 길이는 바이트 기준입니다. UTF-8에서 한글 1자 = 3바이트.
+ *    VARCHAR2(50)은 한글 약 16자입니다. 넉넉하게 잡아두었습니다.
+ *
+ * 컨벤션
+ *  - 테이블/컬럼명 : 대문자 스네이크, 축약어 사용
+ *  - 모든 테이블에 감사 컬럼 4종 (REG_ID, REG_DT, UPD_ID, UPD_DT)
+ *  - 삭제는 물리 삭제 대신 USE_YN / DEL_YN 플래그
+ *  - 상태값은 하드코딩 대신 CMMN_CODE 테이블 참조
+ * ===================================================================== */
+
+
+/* ---------------------------------------------------------------------
+ * 초기화 (필요할 때만 주석 해제)
+ * 자식 테이블부터 지워야 FK 제약에 걸리지 않습니다.
+ * ------------------------------------------------------------------- */
+-- DROP TABLE DELIVERY      CASCADE CONSTRAINTS;
+-- DROP TABLE PAYMENT       CASCADE CONSTRAINTS;
+-- DROP TABLE ORDER_ITEM    CASCADE CONSTRAINTS;
+-- DROP TABLE ORDERS        CASCADE CONSTRAINTS;
+-- DROP TABLE CART          CASCADE CONSTRAINTS;
+-- DROP TABLE PRODUCT_IMAGE CASCADE CONSTRAINTS;
+-- DROP TABLE PRODUCT_OPTION CASCADE CONSTRAINTS;
+-- DROP TABLE PRODUCT       CASCADE CONSTRAINTS;
+-- DROP TABLE CATEGORY      CASCADE CONSTRAINTS;
+-- DROP TABLE MEMBER        CASCADE CONSTRAINTS;
+-- DROP TABLE CMMN_CODE     CASCADE CONSTRAINTS;
+--
+-- DROP SEQUENCE SEQ_MBR_NO;
+-- DROP SEQUENCE SEQ_CTGRY_NO;
+-- DROP SEQUENCE SEQ_PRD_NO;
+-- DROP SEQUENCE SEQ_OPT_NO;
+-- DROP SEQUENCE SEQ_IMG_NO;
+-- DROP SEQUENCE SEQ_CART_NO;
+-- DROP SEQUENCE SEQ_ORD_NO;
+-- DROP SEQUENCE SEQ_ORD_ITEM_NO;
+-- DROP SEQUENCE SEQ_PAY_NO;
+-- DROP SEQUENCE SEQ_DLVR_NO;
+
+
+/* =====================================================================
+ * 1. 공통코드
+ * 주문상태, 결제수단 같은 코드성 값을 한곳에서 관리합니다.
+ * ===================================================================== */
+CREATE TABLE CMMN_CODE (
+    GRP_CD      VARCHAR2(30)   NOT NULL,
+    CD          VARCHAR2(30)   NOT NULL,
+    CD_NM       VARCHAR2(100)  NOT NULL,
+    CD_DESC     VARCHAR2(500),
+    SORT_ORD    NUMBER(5)      DEFAULT 0   NOT NULL,
+    USE_YN      CHAR(1)        DEFAULT 'Y' NOT NULL,
+    REG_ID      VARCHAR2(50)   DEFAULT 'SYSTEM' NOT NULL,
+    REG_DT      DATE           DEFAULT SYSDATE  NOT NULL,
+    UPD_ID      VARCHAR2(50),
+    UPD_DT      DATE,
+    CONSTRAINT PK_CMMN_CODE PRIMARY KEY (GRP_CD, CD),
+    CONSTRAINT CK_CMMN_CODE_USE_YN CHECK (USE_YN IN ('Y', 'N'))
+);
+
+COMMENT ON TABLE  CMMN_CODE          IS '공통코드';
+COMMENT ON COLUMN CMMN_CODE.GRP_CD   IS '그룹코드';
+COMMENT ON COLUMN CMMN_CODE.CD       IS '코드';
+COMMENT ON COLUMN CMMN_CODE.CD_NM    IS '코드명';
+COMMENT ON COLUMN CMMN_CODE.SORT_ORD IS '정렬순서';
+COMMENT ON COLUMN CMMN_CODE.USE_YN   IS '사용여부';
+
+
+/* =====================================================================
+ * 2. 회원
+ * ===================================================================== */
+CREATE TABLE MEMBER (
+    MBR_NO       NUMBER(12)    NOT NULL,
+    MBR_ID       VARCHAR2(50)  NOT NULL,
+    MBR_PWD      VARCHAR2(200) NOT NULL,
+    MBR_NM       VARCHAR2(100) NOT NULL,
+    EMAIL        VARCHAR2(200),
+    MOBILE_NO    VARCHAR2(20),
+    ZIP_CD       VARCHAR2(10),
+    ADDR1        VARCHAR2(300),
+    ADDR2        VARCHAR2(300),
+    MBR_STTS_CD  VARCHAR2(30)  DEFAULT 'NORMAL' NOT NULL,
+    MBR_GRD_CD   VARCHAR2(30)  DEFAULT 'BRONZE' NOT NULL,
+    LAST_LGN_DT  DATE,
+    DEL_YN       CHAR(1)       DEFAULT 'N' NOT NULL,
+    REG_ID       VARCHAR2(50)  DEFAULT 'SYSTEM' NOT NULL,
+    REG_DT       DATE          DEFAULT SYSDATE  NOT NULL,
+    UPD_ID       VARCHAR2(50),
+    UPD_DT       DATE,
+    CONSTRAINT PK_MEMBER PRIMARY KEY (MBR_NO),
+    CONSTRAINT UK_MEMBER_MBR_ID UNIQUE (MBR_ID),
+    CONSTRAINT CK_MEMBER_DEL_YN CHECK (DEL_YN IN ('Y', 'N'))
+);
+
+CREATE SEQUENCE SEQ_MBR_NO START WITH 1 INCREMENT BY 1 NOCACHE;
+
+COMMENT ON TABLE  MEMBER             IS '회원';
+COMMENT ON COLUMN MEMBER.MBR_NO      IS '회원번호';
+COMMENT ON COLUMN MEMBER.MBR_ID      IS '회원아이디';
+COMMENT ON COLUMN MEMBER.MBR_PWD     IS '비밀번호 (BCrypt 해시 저장)';
+COMMENT ON COLUMN MEMBER.MBR_STTS_CD IS '회원상태코드 (CMMN_CODE.MBR_STTS)';
+COMMENT ON COLUMN MEMBER.MBR_GRD_CD  IS '회원등급코드 (CMMN_CODE.MBR_GRD)';
+COMMENT ON COLUMN MEMBER.DEL_YN      IS '삭제여부 (논리삭제)';
+
+
+/* =====================================================================
+ * 3. 카테고리
+ * UP_CTGRY_NO 로 자기 자신을 참조하는 계층 구조입니다.
+ * 오라클의 CONNECT BY 계층 쿼리를 연습하기 좋은 지점입니다.
+ * ===================================================================== */
+CREATE TABLE CATEGORY (
+    CTGRY_NO    NUMBER(10)    NOT NULL,
+    UP_CTGRY_NO NUMBER(10),
+    CTGRY_NM    VARCHAR2(100) NOT NULL,
+    CTGRY_LVL   NUMBER(2)     DEFAULT 1 NOT NULL,
+    SORT_ORD    NUMBER(5)     DEFAULT 0 NOT NULL,
+    USE_YN      CHAR(1)       DEFAULT 'Y' NOT NULL,
+    REG_ID      VARCHAR2(50)  DEFAULT 'SYSTEM' NOT NULL,
+    REG_DT      DATE          DEFAULT SYSDATE  NOT NULL,
+    UPD_ID      VARCHAR2(50),
+    UPD_DT      DATE,
+    CONSTRAINT PK_CATEGORY PRIMARY KEY (CTGRY_NO),
+    CONSTRAINT FK_CATEGORY_UP FOREIGN KEY (UP_CTGRY_NO) REFERENCES CATEGORY (CTGRY_NO),
+    CONSTRAINT CK_CATEGORY_USE_YN CHECK (USE_YN IN ('Y', 'N'))
+);
+
+CREATE SEQUENCE SEQ_CTGRY_NO START WITH 1 INCREMENT BY 1 NOCACHE;
+
+COMMENT ON TABLE  CATEGORY             IS '상품 카테고리';
+COMMENT ON COLUMN CATEGORY.UP_CTGRY_NO IS '상위카테고리번호';
+COMMENT ON COLUMN CATEGORY.CTGRY_LVL   IS '카테고리 깊이 (1: 대분류)';
+
+
+/* =====================================================================
+ * 4. 상품
+ * ===================================================================== */
+CREATE TABLE PRODUCT (
+    PRD_NO       NUMBER(12)    NOT NULL,
+    CTGRY_NO     NUMBER(10)    NOT NULL,
+    PRD_NM       VARCHAR2(300) NOT NULL,
+    PRD_DESC     CLOB,
+    ORGNL_PRC    NUMBER(12)    DEFAULT 0 NOT NULL,
+    SALE_PRC     NUMBER(12)    DEFAULT 0 NOT NULL,
+    THMB_IMG_URL VARCHAR2(500),
+    SALE_STTS_CD VARCHAR2(30)  DEFAULT 'ON_SALE' NOT NULL,
+    VIEW_CNT     NUMBER(12)    DEFAULT 0 NOT NULL,
+    USE_YN       CHAR(1)       DEFAULT 'Y' NOT NULL,
+    REG_ID       VARCHAR2(50)  DEFAULT 'SYSTEM' NOT NULL,
+    REG_DT       DATE          DEFAULT SYSDATE  NOT NULL,
+    UPD_ID       VARCHAR2(50),
+    UPD_DT       DATE,
+    CONSTRAINT PK_PRODUCT PRIMARY KEY (PRD_NO),
+    CONSTRAINT FK_PRODUCT_CTGRY FOREIGN KEY (CTGRY_NO) REFERENCES CATEGORY (CTGRY_NO),
+    CONSTRAINT CK_PRODUCT_USE_YN CHECK (USE_YN IN ('Y', 'N')),
+    CONSTRAINT CK_PRODUCT_SALE_PRC CHECK (SALE_PRC >= 0)
+);
+
+CREATE SEQUENCE SEQ_PRD_NO START WITH 1 INCREMENT BY 1 NOCACHE;
+
+CREATE INDEX IX_PRODUCT_01 ON PRODUCT (CTGRY_NO, SALE_STTS_CD);
+
+COMMENT ON TABLE  PRODUCT              IS '상품';
+COMMENT ON COLUMN PRODUCT.ORGNL_PRC    IS '정가';
+COMMENT ON COLUMN PRODUCT.SALE_PRC     IS '판매가';
+COMMENT ON COLUMN PRODUCT.SALE_STTS_CD IS '판매상태코드 (CMMN_CODE.SALE_STTS)';
+
+
+/* =====================================================================
+ * 5. 상품 옵션
+ * 재고는 상품이 아니라 옵션 단위로 관리합니다.
+ * (색상/사이즈별로 재고가 다르기 때문)
+ * ===================================================================== */
+CREATE TABLE PRODUCT_OPTION (
+    OPT_NO    NUMBER(12)    NOT NULL,
+    PRD_NO    NUMBER(12)    NOT NULL,
+    OPT_NM    VARCHAR2(200) NOT NULL,
+    ADD_PRC   NUMBER(12)    DEFAULT 0 NOT NULL,
+    STOCK_QTY NUMBER(10)    DEFAULT 0 NOT NULL,
+    SORT_ORD  NUMBER(5)     DEFAULT 0 NOT NULL,
+    USE_YN    CHAR(1)       DEFAULT 'Y' NOT NULL,
+    REG_ID    VARCHAR2(50)  DEFAULT 'SYSTEM' NOT NULL,
+    REG_DT    DATE          DEFAULT SYSDATE  NOT NULL,
+    UPD_ID    VARCHAR2(50),
+    UPD_DT    DATE,
+    CONSTRAINT PK_PRODUCT_OPTION PRIMARY KEY (OPT_NO),
+    CONSTRAINT FK_PRD_OPT_PRD FOREIGN KEY (PRD_NO) REFERENCES PRODUCT (PRD_NO),
+    CONSTRAINT CK_PRD_OPT_STOCK CHECK (STOCK_QTY >= 0)
+);
+
+CREATE SEQUENCE SEQ_OPT_NO START WITH 1 INCREMENT BY 1 NOCACHE;
+
+CREATE INDEX IX_PRODUCT_OPTION_01 ON PRODUCT_OPTION (PRD_NO);
+
+COMMENT ON TABLE  PRODUCT_OPTION           IS '상품 옵션';
+COMMENT ON COLUMN PRODUCT_OPTION.ADD_PRC   IS '옵션 추가금액';
+COMMENT ON COLUMN PRODUCT_OPTION.STOCK_QTY IS '재고수량';
+
+
+/* =====================================================================
+ * 6. 상품 이미지
+ * ===================================================================== */
+CREATE TABLE PRODUCT_IMAGE (
+    IMG_NO   NUMBER(12)    NOT NULL,
+    PRD_NO   NUMBER(12)    NOT NULL,
+    IMG_URL  VARCHAR2(500) NOT NULL,
+    SORT_ORD NUMBER(5)     DEFAULT 0 NOT NULL,
+    USE_YN   CHAR(1)       DEFAULT 'Y' NOT NULL,
+    REG_ID   VARCHAR2(50)  DEFAULT 'SYSTEM' NOT NULL,
+    REG_DT   DATE          DEFAULT SYSDATE  NOT NULL,
+    UPD_ID   VARCHAR2(50),
+    UPD_DT   DATE,
+    CONSTRAINT PK_PRODUCT_IMAGE PRIMARY KEY (IMG_NO),
+    CONSTRAINT FK_PRD_IMG_PRD FOREIGN KEY (PRD_NO) REFERENCES PRODUCT (PRD_NO)
+);
+
+CREATE SEQUENCE SEQ_IMG_NO START WITH 1 INCREMENT BY 1 NOCACHE;
+
+COMMENT ON TABLE PRODUCT_IMAGE IS '상품 이미지';
+
+
+/* =====================================================================
+ * 7. 장바구니
+ * (MBR_NO, OPT_NO) 유니크 제약이 걸려 있습니다.
+ * 같은 옵션을 또 담으면 INSERT가 아니라 수량을 더해야 하므로
+ * MERGE INTO 문을 연습하기에 딱 좋은 테이블입니다.
+ * ===================================================================== */
+CREATE TABLE CART (
+    CART_NO NUMBER(12)   NOT NULL,
+    MBR_NO  NUMBER(12)   NOT NULL,
+    PRD_NO  NUMBER(12)   NOT NULL,
+    OPT_NO  NUMBER(12)   NOT NULL,
+    ORD_QTY NUMBER(10)   DEFAULT 1 NOT NULL,
+    REG_ID  VARCHAR2(50) DEFAULT 'SYSTEM' NOT NULL,
+    REG_DT  DATE         DEFAULT SYSDATE  NOT NULL,
+    UPD_ID  VARCHAR2(50),
+    UPD_DT  DATE,
+    CONSTRAINT PK_CART PRIMARY KEY (CART_NO),
+    CONSTRAINT UK_CART_01 UNIQUE (MBR_NO, OPT_NO),
+    CONSTRAINT FK_CART_MBR FOREIGN KEY (MBR_NO) REFERENCES MEMBER (MBR_NO),
+    CONSTRAINT FK_CART_PRD FOREIGN KEY (PRD_NO) REFERENCES PRODUCT (PRD_NO),
+    CONSTRAINT FK_CART_OPT FOREIGN KEY (OPT_NO) REFERENCES PRODUCT_OPTION (OPT_NO),
+    CONSTRAINT CK_CART_QTY CHECK (ORD_QTY > 0)
+);
+
+CREATE SEQUENCE SEQ_CART_NO START WITH 1 INCREMENT BY 1 NOCACHE;
+
+COMMENT ON TABLE CART IS '장바구니';
+
+
+/* =====================================================================
+ * 8. 주문
+ * ORDER 는 오라클 예약어이므로 테이블명은 ORDERS 를 씁니다.
+ * 배송지 정보를 주문 시점 값으로 복사해 보관합니다.
+ * 회원이 나중에 주소를 바꿔도 과거 주문의 배송지는 유지되어야 하기 때문입니다.
+ * ===================================================================== */
+CREATE TABLE ORDERS (
+    ORD_NO         NUMBER(12)    NOT NULL,
+    ORD_NUM        VARCHAR2(20)  NOT NULL,
+    MBR_NO         NUMBER(12)    NOT NULL,
+    ORD_STTS_CD    VARCHAR2(30)  DEFAULT 'ORD_RCPT' NOT NULL,
+    ORD_DT         DATE          DEFAULT SYSDATE NOT NULL,
+    TOT_ORD_AMT    NUMBER(14)    DEFAULT 0 NOT NULL,
+    DSCNT_AMT      NUMBER(14)    DEFAULT 0 NOT NULL,
+    DLVR_FEE       NUMBER(10)    DEFAULT 0 NOT NULL,
+    PAY_AMT        NUMBER(14)    DEFAULT 0 NOT NULL,
+    RCVR_NM        VARCHAR2(100) NOT NULL,
+    RCVR_MOBILE_NO VARCHAR2(20)  NOT NULL,
+    ZIP_CD         VARCHAR2(10),
+    ADDR1          VARCHAR2(300),
+    ADDR2          VARCHAR2(300),
+    DLVR_MEMO      VARCHAR2(500),
+    REG_ID         VARCHAR2(50)  DEFAULT 'SYSTEM' NOT NULL,
+    REG_DT         DATE          DEFAULT SYSDATE  NOT NULL,
+    UPD_ID         VARCHAR2(50),
+    UPD_DT         DATE,
+    CONSTRAINT PK_ORDERS PRIMARY KEY (ORD_NO),
+    CONSTRAINT UK_ORDERS_ORD_NUM UNIQUE (ORD_NUM),
+    CONSTRAINT FK_ORDERS_MBR FOREIGN KEY (MBR_NO) REFERENCES MEMBER (MBR_NO)
+);
+
+CREATE SEQUENCE SEQ_ORD_NO START WITH 1 INCREMENT BY 1 NOCACHE;
+
+CREATE INDEX IX_ORDERS_01 ON ORDERS (MBR_NO, ORD_DT DESC);
+
+COMMENT ON TABLE  ORDERS             IS '주문';
+COMMENT ON COLUMN ORDERS.ORD_NUM     IS '주문번호 (고객 노출용, 예: 20260904000001)';
+COMMENT ON COLUMN ORDERS.ORD_STTS_CD IS '주문상태코드 (CMMN_CODE.ORD_STTS)';
+COMMENT ON COLUMN ORDERS.TOT_ORD_AMT IS '총 주문금액 (상품 합계)';
+COMMENT ON COLUMN ORDERS.PAY_AMT     IS '최종 결제금액 (총주문 - 할인 + 배송비)';
+
+
+/* =====================================================================
+ * 9. 주문 상품
+ *
+ * ★ 이 테이블이 이 스키마에서 가장 중요한 부분입니다.
+ *   PRD_NM, OPT_NM, SALE_PRC 는 PRODUCT 테이블에도 있지만
+ *   여기에 주문 시점 값을 복사해서 저장합니다.
+ *   상품 가격이 바뀌거나 상품이 삭제되어도
+ *   과거 주문 내역은 그대로 남아 있어야 하기 때문입니다.
+ * ===================================================================== */
+CREATE TABLE ORDER_ITEM (
+    ORD_ITEM_NO     NUMBER(12)    NOT NULL,
+    ORD_NO          NUMBER(12)    NOT NULL,
+    PRD_NO          NUMBER(12)    NOT NULL,
+    OPT_NO          NUMBER(12)    NOT NULL,
+    PRD_NM          VARCHAR2(300) NOT NULL,
+    OPT_NM          VARCHAR2(200),
+    SALE_PRC        NUMBER(12)    NOT NULL,
+    ADD_PRC         NUMBER(12)    DEFAULT 0 NOT NULL,
+    ORD_QTY         NUMBER(10)    NOT NULL,
+    ITEM_AMT        NUMBER(14)    NOT NULL,
+    ORD_ITEM_STTS_CD VARCHAR2(30) DEFAULT 'ORD_RCPT' NOT NULL,
+    REG_ID          VARCHAR2(50)  DEFAULT 'SYSTEM' NOT NULL,
+    REG_DT          DATE          DEFAULT SYSDATE  NOT NULL,
+    UPD_ID          VARCHAR2(50),
+    UPD_DT          DATE,
+    CONSTRAINT PK_ORDER_ITEM PRIMARY KEY (ORD_ITEM_NO),
+    CONSTRAINT FK_ORD_ITEM_ORD FOREIGN KEY (ORD_NO) REFERENCES ORDERS (ORD_NO),
+    CONSTRAINT FK_ORD_ITEM_PRD FOREIGN KEY (PRD_NO) REFERENCES PRODUCT (PRD_NO),
+    CONSTRAINT CK_ORD_ITEM_QTY CHECK (ORD_QTY > 0)
+);
+
+CREATE SEQUENCE SEQ_ORD_ITEM_NO START WITH 1 INCREMENT BY 1 NOCACHE;
+
+CREATE INDEX IX_ORDER_ITEM_01 ON ORDER_ITEM (ORD_NO);
+
+COMMENT ON TABLE  ORDER_ITEM          IS '주문 상품';
+COMMENT ON COLUMN ORDER_ITEM.PRD_NM   IS '주문 당시 상품명 (스냅샷)';
+COMMENT ON COLUMN ORDER_ITEM.SALE_PRC IS '주문 당시 판매가 (스냅샷)';
+COMMENT ON COLUMN ORDER_ITEM.ITEM_AMT IS '(판매가 + 옵션추가금) * 수량';
+
+
+/* =====================================================================
+ * 10. 결제
+ * 부분취소를 고려해 주문 1건에 결제 여러 건이 붙을 수 있게 두었습니다.
+ * ===================================================================== */
+CREATE TABLE PAYMENT (
+    PAY_NO      NUMBER(12)    NOT NULL,
+    ORD_NO      NUMBER(12)    NOT NULL,
+    PAY_MTHD_CD VARCHAR2(30)  NOT NULL,
+    PAY_STTS_CD VARCHAR2(30)  DEFAULT 'PAY_RDY' NOT NULL,
+    PAY_AMT     NUMBER(14)    NOT NULL,
+    PG_TID      VARCHAR2(100),
+    APRV_NO     VARCHAR2(50),
+    APRV_DT     DATE,
+    CNCL_DT     DATE,
+    CNCL_RSN    VARCHAR2(500),
+    REG_ID      VARCHAR2(50)  DEFAULT 'SYSTEM' NOT NULL,
+    REG_DT      DATE          DEFAULT SYSDATE  NOT NULL,
+    UPD_ID      VARCHAR2(50),
+    UPD_DT      DATE,
+    CONSTRAINT PK_PAYMENT PRIMARY KEY (PAY_NO),
+    CONSTRAINT FK_PAYMENT_ORD FOREIGN KEY (ORD_NO) REFERENCES ORDERS (ORD_NO)
+);
+
+CREATE SEQUENCE SEQ_PAY_NO START WITH 1 INCREMENT BY 1 NOCACHE;
+
+CREATE INDEX IX_PAYMENT_01 ON PAYMENT (ORD_NO);
+
+COMMENT ON TABLE  PAYMENT             IS '결제';
+COMMENT ON COLUMN PAYMENT.PAY_MTHD_CD IS '결제수단코드 (CMMN_CODE.PAY_MTHD)';
+COMMENT ON COLUMN PAYMENT.PG_TID      IS 'PG사 거래 고유번호';
+
+
+/* =====================================================================
+ * 11. 배송
+ * ===================================================================== */
+CREATE TABLE DELIVERY (
+    DLVR_NO      NUMBER(12)   NOT NULL,
+    ORD_NO       NUMBER(12)   NOT NULL,
+    DLVR_STTS_CD VARCHAR2(30) DEFAULT 'DLVR_RDY' NOT NULL,
+    DLVR_CO_CD   VARCHAR2(30),
+    INVC_NO      VARCHAR2(50),
+    DLVR_STRT_DT DATE,
+    DLVR_CMPT_DT DATE,
+    REG_ID       VARCHAR2(50) DEFAULT 'SYSTEM' NOT NULL,
+    REG_DT       DATE         DEFAULT SYSDATE  NOT NULL,
+    UPD_ID       VARCHAR2(50),
+    UPD_DT       DATE,
+    CONSTRAINT PK_DELIVERY PRIMARY KEY (DLVR_NO),
+    CONSTRAINT FK_DELIVERY_ORD FOREIGN KEY (ORD_NO) REFERENCES ORDERS (ORD_NO)
+);
+
+CREATE SEQUENCE SEQ_DLVR_NO START WITH 1 INCREMENT BY 1 NOCACHE;
+
+COMMENT ON TABLE  DELIVERY         IS '배송';
+COMMENT ON COLUMN DELIVERY.INVC_NO IS '송장번호';
+
+
+/* =====================================================================
+ * 12. 공통코드 초기 데이터
+ * ===================================================================== */
+INSERT INTO CMMN_CODE (GRP_CD, CD, CD_NM, SORT_ORD) VALUES ('MBR_STTS', 'NORMAL',    '정상',       1);
+INSERT INTO CMMN_CODE (GRP_CD, CD, CD_NM, SORT_ORD) VALUES ('MBR_STTS', 'DORMANT',   '휴면',       2);
+INSERT INTO CMMN_CODE (GRP_CD, CD, CD_NM, SORT_ORD) VALUES ('MBR_STTS', 'SUSPENDED', '정지',       3);
+INSERT INTO CMMN_CODE (GRP_CD, CD, CD_NM, SORT_ORD) VALUES ('MBR_STTS', 'WITHDRAWN', '탈퇴',       4);
+
+INSERT INTO CMMN_CODE (GRP_CD, CD, CD_NM, SORT_ORD) VALUES ('MBR_GRD',  'BRONZE',    '브론즈',     1);
+INSERT INTO CMMN_CODE (GRP_CD, CD, CD_NM, SORT_ORD) VALUES ('MBR_GRD',  'SILVER',    '실버',       2);
+INSERT INTO CMMN_CODE (GRP_CD, CD, CD_NM, SORT_ORD) VALUES ('MBR_GRD',  'GOLD',      '골드',       3);
+
+INSERT INTO CMMN_CODE (GRP_CD, CD, CD_NM, SORT_ORD) VALUES ('SALE_STTS','ON_SALE',   '판매중',     1);
+INSERT INTO CMMN_CODE (GRP_CD, CD, CD_NM, SORT_ORD) VALUES ('SALE_STTS','SOLD_OUT',  '품절',       2);
+INSERT INTO CMMN_CODE (GRP_CD, CD, CD_NM, SORT_ORD) VALUES ('SALE_STTS','STOPPED',   '판매중지',   3);
+
+INSERT INTO CMMN_CODE (GRP_CD, CD, CD_NM, SORT_ORD) VALUES ('ORD_STTS', 'ORD_RCPT',  '주문접수',   1);
+INSERT INTO CMMN_CODE (GRP_CD, CD, CD_NM, SORT_ORD) VALUES ('ORD_STTS', 'PAY_CMPT',  '결제완료',   2);
+INSERT INTO CMMN_CODE (GRP_CD, CD, CD_NM, SORT_ORD) VALUES ('ORD_STTS', 'PREPARING', '배송준비중', 3);
+INSERT INTO CMMN_CODE (GRP_CD, CD, CD_NM, SORT_ORD) VALUES ('ORD_STTS', 'SHIPPING',  '배송중',     4);
+INSERT INTO CMMN_CODE (GRP_CD, CD, CD_NM, SORT_ORD) VALUES ('ORD_STTS', 'DLVR_CMPT', '배송완료',   5);
+INSERT INTO CMMN_CODE (GRP_CD, CD, CD_NM, SORT_ORD) VALUES ('ORD_STTS', 'CANCELED',  '주문취소',   6);
+
+INSERT INTO CMMN_CODE (GRP_CD, CD, CD_NM, SORT_ORD) VALUES ('PAY_MTHD', 'CARD',      '신용카드',   1);
+INSERT INTO CMMN_CODE (GRP_CD, CD, CD_NM, SORT_ORD) VALUES ('PAY_MTHD', 'TRANSFER',  '계좌이체',   2);
+INSERT INTO CMMN_CODE (GRP_CD, CD, CD_NM, SORT_ORD) VALUES ('PAY_MTHD', 'VBANK',     '가상계좌',   3);
+INSERT INTO CMMN_CODE (GRP_CD, CD, CD_NM, SORT_ORD) VALUES ('PAY_MTHD', 'EASY_PAY',  '간편결제',   4);
+
+INSERT INTO CMMN_CODE (GRP_CD, CD, CD_NM, SORT_ORD) VALUES ('PAY_STTS', 'PAY_RDY',   '결제대기',   1);
+INSERT INTO CMMN_CODE (GRP_CD, CD, CD_NM, SORT_ORD) VALUES ('PAY_STTS', 'PAY_CMPT',  '결제완료',   2);
+INSERT INTO CMMN_CODE (GRP_CD, CD, CD_NM, SORT_ORD) VALUES ('PAY_STTS', 'PAY_FAIL',  '결제실패',   3);
+INSERT INTO CMMN_CODE (GRP_CD, CD, CD_NM, SORT_ORD) VALUES ('PAY_STTS', 'PAY_CNCL',  '결제취소',   4);
+
+INSERT INTO CMMN_CODE (GRP_CD, CD, CD_NM, SORT_ORD) VALUES ('DLVR_STTS','DLVR_RDY',  '배송준비',   1);
+INSERT INTO CMMN_CODE (GRP_CD, CD, CD_NM, SORT_ORD) VALUES ('DLVR_STTS','SHIPPING',  '배송중',     2);
+INSERT INTO CMMN_CODE (GRP_CD, CD, CD_NM, SORT_ORD) VALUES ('DLVR_STTS','DLVR_CMPT', '배송완료',   3);
+
+COMMIT;
+
+
+/* =====================================================================
+ * 13. 확인용 쿼리
+ * ===================================================================== */
+-- 생성된 테이블 목록
+-- SELECT TABLE_NAME FROM USER_TABLES ORDER BY TABLE_NAME;
+
+-- 공통코드 확인
+-- SELECT GRP_CD, CD, CD_NM FROM CMMN_CODE ORDER BY GRP_CD, SORT_ORD;
