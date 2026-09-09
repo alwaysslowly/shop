@@ -2,6 +2,7 @@ package com.shop.service;
 
 import com.shop.domain.Member;
 import com.shop.mapper.MemberMapper;
+import com.shop.util.AesUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -14,19 +15,18 @@ public class MemberService {
 
     private final MemberMapper memberMapper;
     private final PasswordEncoder passwordEncoder;
+    private final AesUtil aesUtil;
 
     @Transactional
     public Long signUp(Member member) {
-
         if (memberMapper.countByMbrId(member.getMbrId()) > 0) {
             throw new IllegalArgumentException("이미 사용 중인 아이디입니다.");
         }
 
-        String encoded = passwordEncoder.encode(member.getMbrPwd());
-        member.setMbrPwd(encoded);
+        member.setMbrPwd(passwordEncoder.encode(member.getMbrPwd()));
+        member.setMobileNo(aesUtil.encrypt(member.getMobileNo()));
 
         memberMapper.insertMember(member);
-
         return member.getMbrNo();
     }
 }

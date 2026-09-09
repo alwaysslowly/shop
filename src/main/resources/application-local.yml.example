@@ -4,3 +4,7 @@ spring:
     url: jdbc:oracle:thin:@localhost:1521/FREEPDB1
     username: SHOP
     password: 여기에_본인_비밀번호
+
+app:
+  crypto:
+    key: 여기에_32자리_키
