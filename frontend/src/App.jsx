@@ -2,7 +2,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import ProductList from './pages/ProductList';
 import ProductDetail from './pages/ProductDetail';
 import CategoryList from './pages/CategoryList';
-// import CategoryDetail from './pages/CategoryDetail';
+import CategoryDetail from './pages/CategoryDetail';
 
 function App() {
   return (
@@ -11,7 +11,7 @@ function App() {
         <Route path="/" element={<ProductList />} />
         <Route path="/products/:prdNo" element={<ProductDetail />} />
         <Route path="/categories" element={<CategoryList />} />
-        {/* <Route path="/categories/:ctgryNo" element={<CategoryDetail />} /> */}
+     <Route path="/categories/:ctgryNo" element={<CategoryDetail />} />
       </Routes>
     </BrowserRouter>
   );
